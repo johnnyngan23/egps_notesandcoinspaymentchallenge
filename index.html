@@ -1,732 +1,741 @@
-import React, { useState, useEffect } from 'react';
-import { ShoppingCart, ShoppingBag, ArrowLeft, RefreshCcw, Star, Clock, Trophy, Play, AlertTriangle, Flame, Wallet, Trash2, Store } from 'lucide-react';
-
-// --- 常量與資料設定 ---
-
-// 為了避免 JavaScript 的浮點數誤差 (例如 0.1 + 0.2 = 0.30000000000000004)，
-// 我們在底層計算時將所有金額乘以 100，轉換為整數 (即 Cents) 進行處理。
-const MONEY_ASSETS = [
-  // 紙幣 Banknotes
-  { id: 'n500', value: 50000, label: '$500', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/500_Hong_Kong_dollars_Standard_Chartered_Bank_2010_obverse.jpg/800px-500_Hong_Kong_dollars_Standard_Chartered_Bank_2010_obverse.jpg' },
-  { id: 'n100', value: 10000, label: '$100', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/100_Hong_Kong_dollars_HSBC_2010_obverse.jpg/800px-100_Hong_Kong_dollars_HSBC_2010_obverse.jpg' },
-  { id: 'n50', value: 5000, label: '$50', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/50_Hong_Kong_dollars_Bank_of_China_2010_obverse.jpg/800px-50_Hong_Kong_dollars_Bank_of_China_2010_obverse.jpg' },
-  { id: 'n20', value: 2000, label: '$20', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/20_Hong_Kong_dollars_Standard_Chartered_Bank_2010_obverse.jpg/800px-20_Hong_Kong_dollars_Standard_Chartered_Bank_2010_obverse.jpg' },
-  { id: 'n10', value: 1000, label: '$10', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/10_Hong_Kong_dollars_Hong_Kong_Government_2007_obverse.jpg/800px-10_Hong_Kong_dollars_Hong_Kong_Government_2007_obverse.jpg' },
-  
-  // 硬幣 Coins
-  { id: 'c10', value: 1000, label: '$10', type: 'coin' },
-  { id: 'c5', value: 500, label: '$5', type: 'coin' },
-  { id: 'c2', value: 200, label: '$2', type: 'coin' },
-  { id: 'c1', value: 100, label: '$1', type: 'coin' },
-  { id: 'c05', value: 50, label: '5毫', type: 'coin' },
-  { id: 'c02', value: 20, label: '2毫', type: 'coin' },
-  { id: 'c01', value: 10, label: '1毫', type: 'coin' }
-];
-
-const ITEMS = [
-  { name: '玩具熊', emoji: '🧸' }, { name: '書包', emoji: '🎒' },
-  { name: '故事書', emoji: '📘' }, { name: 'T恤', emoji: '👕' },
-  { name: '波鞋', emoji: '👟' }, { name: '手錶', emoji: '⌚' },
-  { name: '拼圖', emoji: '🧩' }, { name: '顏色筆', emoji: '🖍️' },
-  { name: '畫板', emoji: '🎨' }, { name: '足球', emoji: '⚽' },
-  { name: '水樽', emoji: '💧' }, { name: '筆盒', emoji: '🧃' },
-  { name: '遙控車', emoji: '🏎️' }, { name: '耳機', emoji: '🎧' },
-  { name: '滑板', emoji: '🛹' }
-];
-
-const QUESTIONS_PER_LEVEL = 3;
-
-const FALLBACK_COLORS = {
-  50000: 'bg-yellow-700 text-white',
-  10000: 'bg-red-500 text-white',
-  5000: 'bg-emerald-600 text-white',
-  2000: 'bg-blue-500 text-white',
-  1000: 'bg-purple-600 text-white'
-};
-
-// --- 輔助邏輯 ---
-
-// 格式化金額顯示 (從 cents 轉回字串格式)
-const formatMoneyDisplay = (cents) => {
-  if (cents % 100 === 0) return (cents / 100).toString(); // 整數
-  if (cents % 10 === 0) return (cents / 100).toFixed(1);  // 一位小數 (例如 12.5)
-  return (cents / 100).toFixed(2); // 兩位小數 (防呆)
-};
-
-// 計算最佳貨幣組合 (Greedy Algorithm for HKD)
-const getOptimalBreakdown = (cents) => {
-  // 香港貨幣體系適用於貪婪演算法。面額由大至小排列：
-  let available = [50000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10];
-  let breakdown = {};
-  let remaining = cents;
-  for (let denom of available) {
-    if (remaining >= denom) {
-      let num = Math.floor(remaining / denom);
-      breakdown[denom] = num;
-      remaining -= num * denom;
-    }
-  }
-  return breakdown;
-};
-
-// 產生改善提示
-const getImprovementHint = (userMoney, optimalBreakdown) => {
-  let userCounts = {};
-  userMoney.forEach(m => {
-      userCounts[m.value] = (userCounts[m.value] || 0) + 1;
-  });
-  
-  let inefficientDenoms = [];
-  for (let val in userCounts) {
-      let optVal = optimalBreakdown[val] || 0;
-      if (userCounts[val] > optVal) {
-          inefficientDenoms.push(parseInt(val));
-      }
-  }
-  
-  if (inefficientDenoms.length > 0) {
-      inefficientDenoms.sort((a,b) => a - b);
-      let targetValue = inefficientDenoms[0];
-      let targetLabel = MONEY_ASSETS.find(m => m.value === targetValue)?.label || '';
-      return `💡 提示：試試看把多個 ${targetLabel} 換成更大的面額吧！系統已幫你刪除多餘的部分囉。`;
-  }
-  return "💡 提示：你可以用更少的貨幣數量來付款喔！系統已幫你退回多餘的部分。";
-};
-
-// 智能題庫生成器
-const generateLevelPrices = () => {
-  let attempts = 0;
-  while (attempts < 2000) {
-    let pricesCents = [];
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>安博百貨公司：紙幣與硬幣付款挑戰賽</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    for (let i = 0; i < QUESTIONS_PER_LEVEL; i++) {
-      let pCents = 0;
-      let isValidPrice = false;
-      
-      while (!isValidPrice) {
-        // 為了確保混合使用紙幣和硬幣，我們隨機加上尾數「毫」
-        let randomCents = Math.floor(Math.random() * 10) * 10; // 0, 10, 20...90 cents
-
-        if (i === 0) {
-          // 第一題：大金額 (500 - 999元)
-          let dollars = Math.floor(Math.random() * 500) + 500;
-          pCents = dollars * 100 + randomCents;
-        } else if (i === 1) {
-          // 第二題：中金額 (100 - 499元)
-          let dollars = Math.floor(Math.random() * 400) + 100;
-          pCents = dollars * 100 + randomCents;
-        } else {
-          // 第三題：小金額 (1 - 99元)
-          let dollars = Math.floor(Math.random() * 99) + 1;
-          pCents = dollars * 100 + randomCents;
-        }
-
-        // 上限不超過 1000 元 (100000 cents)
-        if (pCents > 100000) pCents = 100000;
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; -webkit-tap-highlight-color: transparent; }
+        /* 隱藏捲軸但保持可滾動 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         
-        let breakdown = getOptimalBreakdown(pCents);
-        let count = Object.values(breakdown).reduce((sum, val) => sum + val, 0);
-        
-        // 確保至少需要 2 個錢幣/紙幣組合
-        if (count >= 2 && pCents <= 100000) {
-          isValidPrice = true;
+        /* 針對硬幣設計的立體效果 */
+        .coin-shadow {
+            box-shadow: inset 0 -3px 4px rgba(0,0,0,0.3), 0 2px 4px rgba(0,0,0,0.2);
         }
-      }
-      pricesCents.push(pCents);
-    }
-    
-    // 隨機打亂題目順序
-    pricesCents.sort(() => Math.random() - 0.5);
-    
-    // 檢查 3 個價格是否完全不同
-    let uniquePrices = new Set(pricesCents);
-    if (uniquePrices.size === QUESTIONS_PER_LEVEL) {
-      return pricesCents;
-    }
-    attempts++;
-  }
-  return [68050, 27020, 4010].sort(() => Math.random() - 0.5); // Fallback amounts
-};
+    </style>
+</head>
+<body class="bg-gray-100 overflow-hidden text-gray-800">
+    <div id="root"></div>
 
-const formatTime = (ms) => {
-  const totalSeconds = ms / 1000;
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-  const tenths = Math.floor((totalSeconds * 10) % 10);
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${tenths}`;
-};
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
-// --- UI 組件 ---
+        // --- 圖示庫 (替換 lucide-react 以適應單一 HTML) ---
+        const Icon = ({ path, className = "", size = 24, fill = "none" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {path}
+            </svg>
+        );
+        const Icons = {
+            ShoppingCart: (props) => <Icon path={<><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></>} {...props} />,
+            ShoppingBag: (props) => <Icon path={<><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></>} {...props} />,
+            Trash2: (props) => <Icon path={<><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></>} {...props} />,
+            ArrowLeft: (props) => <Icon path={<><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></>} {...props} />,
+            RefreshCcw: (props) => <Icon path={<><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21v-5h5"/></>} {...props} />,
+            Clock: (props) => <Icon path={<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>} {...props} />,
+            Trophy: (props) => <Icon path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} {...props} />,
+            Play: (props) => <Icon path={<polygon points="5 3 19 12 5 21 5 3"/>} {...props} />,
+            AlertTriangle: (props) => <Icon path={<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>} {...props} />,
+            Flame: (props) => <Icon path={<><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></>} {...props} />,
+            Wallet: (props) => <Icon path={<><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></>} {...props} />,
+            Store: (props) => <Icon path={<><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/></>} {...props} />,
+            CheckCircle: (props) => <Icon path={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></>} {...props} />,
+            XCircle: (props) => <Icon path={<><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></>} {...props} />,
+            Star: (props) => <Icon path={<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />} {...props} />
+        };
 
-const MoneyItem = ({ money, onClick, isSelectable = true }) => {
-  const [imgFailed, setImgFailed] = useState(false);
-  const baseClasses = `flex items-center justify-center transition-transform duration-200 shrink-0 select-none ${isSelectable ? 'cursor-pointer hover:-translate-y-1 hover:shadow-lg active:scale-95' : ''}`;
-  
-  // 硬幣：純 CSS 繪製 (保證各種設備上都清晰漂亮)
-  if (money.type === 'coin') {
-    const coinClasses = {
-      'c10': 'bg-gradient-to-br from-gray-100 to-gray-300 border-[6px] border-yellow-500 text-gray-800 shadow-md', // 雙色硬幣
-      'c5': 'bg-gradient-to-br from-gray-100 to-gray-400 border-4 border-gray-400 text-gray-800 shadow-md',
-      'c2': 'bg-gradient-to-br from-gray-100 to-gray-400 border-4 border-gray-400 border-dashed text-gray-800 shadow-md', // 波浪邊
-      'c1': 'bg-gradient-to-br from-gray-100 to-gray-400 border-2 border-gray-400 text-gray-800 shadow-md',
-      'c05': 'bg-gradient-to-br from-yellow-300 to-yellow-600 border-2 border-yellow-700 text-yellow-900 shadow-md',
-      'c02': 'bg-gradient-to-br from-yellow-300 to-yellow-600 border-4 border-yellow-700 border-dashed text-yellow-900 shadow-md', // 波浪邊
-      'c01': 'bg-gradient-to-br from-yellow-300 to-yellow-600 border-2 border-yellow-700 text-yellow-900 shadow-sm',
-    };
-    const coinSizes = {
-      'c10': 'w-14 h-14 md:w-16 md:h-16 text-lg md:text-xl font-black',
-      'c5':  'w-16 h-16 md:w-[72px] md:h-[72px] text-xl md:text-2xl font-black',
-      'c2':  'w-14 h-14 md:w-16 md:h-16 text-lg md:text-xl font-bold',
-      'c1':  'w-12 h-12 md:w-14 md:h-14 text-base md:text-lg font-bold',
-      'c05': 'w-14 h-14 md:w-16 md:h-16 text-lg md:text-xl font-bold',
-      'c02': 'w-12 h-12 md:w-14 md:h-14 text-base md:text-lg font-bold',
-      'c01': 'w-10 h-10 md:w-12 md:h-12 text-sm md:text-base font-bold',
-    };
-    return (
-      <div onClick={onClick} className={`${baseClasses} rounded-full flex flex-col ${coinClasses[money.id]} ${coinSizes[money.id]}`}>
-         {money.label}
-      </div>
-    );
-  }
-
-  // 紙幣：嘗試加載圖片，失敗則用色塊 fallback
-  if (imgFailed || !money.img) {
-    return (
-      <div onClick={onClick} className={`${baseClasses} w-24 h-12 sm:w-28 sm:h-14 md:w-32 md:h-16 rounded-md border-2 border-white/30 font-bold text-lg md:text-xl shadow-md ${FALLBACK_COLORS[money.value]}`}>
-        {money.label}
-      </div>
-    );
-  }
-  return (
-    <img src={money.img} alt={money.label} onClick={onClick} draggable={false} onError={() => setImgFailed(true)} className={`${baseClasses} h-12 sm:h-14 md:h-16 w-auto rounded-md object-cover border border-gray-200 bg-white shadow-md`} />
-  );
-};
-
-export default function App() {
-  const [gameState, setGameState] = useState('menu'); 
-  const [studentName, setStudentName] = useState('');
-  
-  const [currentLevel, setCurrentLevel] = useState(1);
-  const [questionCount, setQuestionCount] = useState(1);
-  const [roundPricesCents, setRoundPricesCents] = useState([]);
-  const [currentItem, setCurrentItem] = useState(null);
-  
-  // 目標金額與已選金額均以 Cents 為單位計算
-  const [targetPriceCents, setTargetPriceCents] = useState(0);
-  const [selectedMoney, setSelectedMoney] = useState([]);
-  
-  const [feedback, setFeedback] = useState(null);
-  const [suboptimalHint, setSuboptimalHint] = useState("");
-  
-  const [elapsedTime, setElapsedTime] = useState(0);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const [leaderboard, setLeaderboard] = useState([]);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('hkMoneySpeedLeaderboard');
-      if (saved) setLeaderboard(JSON.parse(saved));
-    } catch(e) {}
-  }, []);
-
-  useEffect(() => {
-    let interval;
-    if (isTimerRunning) {
-      interval = setInterval(() => {
-        setElapsedTime(prev => prev + 100);
-      }, 100);
-    }
-    return () => clearInterval(interval);
-  }, [isTimerRunning]);
-
-  const startChallenge = () => {
-    if (!studentName.trim()) {
-      alert("請先輸入名字！");
-      return;
-    }
-    setElapsedTime(0);
-    startLevel(1);
-  };
-
-  const startLevel = (level) => {
-    const pricesCents = generateLevelPrices();
-    setRoundPricesCents(pricesCents);
-    setCurrentLevel(level);
-    loadQuestion(1, pricesCents[0]);
-    setGameState('playing');
-    setIsTimerRunning(true);
-  };
-
-  const loadQuestion = (qIndex, priceCents) => {
-    setQuestionCount(qIndex);
-    setTargetPriceCents(priceCents);
-    setCurrentItem(ITEMS[Math.floor(Math.random() * ITEMS.length)]);
-    setSelectedMoney([]);
-    setFeedback(null);
-    setSuboptimalHint("");
-  };
-
-  const addMoney = (moneyTemplate) => {
-    if (feedback !== null) return;
-    const newMoneyInstance = { ...moneyTemplate, instanceId: Date.now() + Math.random() };
-    setSelectedMoney([...selectedMoney, newMoneyInstance]);
-  };
-
-  const removeMoney = (instanceIdToRemove) => {
-    if (feedback !== null) return;
-    setSelectedMoney(selectedMoney.filter(m => m.instanceId !== instanceIdToRemove));
-  };
-
-  const clearMoney = () => {
-    if (feedback !== null) return;
-    setSelectedMoney([]);
-  };
-
-  const checkPayment = () => {
-    const currentTotalCents = selectedMoney.reduce((sum, item) => sum + item.value, 0);
-    
-    // 檢查金額是否正確
-    if (currentTotalCents !== targetPriceCents) {
-      setFeedback('wrong');
-      setTimeout(() => setFeedback(null), 1500);
-      return;
-    }
-
-    // 檢查是否為最優解（最少數量）
-    const optimalBreakdown = getOptimalBreakdown(targetPriceCents);
-    const optimalCount = Object.values(optimalBreakdown).reduce((a, b) => a + b, 0);
-
-    if (selectedMoney.length > optimalCount) {
-      const hintText = getImprovementHint(selectedMoney, optimalBreakdown);
-      setSuboptimalHint(hintText);
-      setFeedback('suboptimal');
-      return; 
-    }
-
-    setFeedback('correct');
-    setTimeout(() => {
-      if (questionCount < QUESTIONS_PER_LEVEL) {
-        loadQuestion(questionCount + 1, roundPricesCents[questionCount]);
-      } else {
-        setIsTimerRunning(false);
-        if (currentLevel === 1) {
-          setGameState('transition');
-        } else {
-          finishGame();
-        }
-      }
-    }, 1500);
-  };
-
-  const finishGame = () => {
-    const newRecord = { name: studentName, time: elapsedTime, date: new Date().toLocaleDateString() };
-    const updatedLeaderboard = [...leaderboard, newRecord].sort((a, b) => a.time - b.time);
-    setLeaderboard(updatedLeaderboard);
-    try {
-      localStorage.setItem('hkMoneySpeedLeaderboard', JSON.stringify(updatedLeaderboard));
-    } catch(e) {}
-    setGameState('result');
-    setFeedback(null);
-  };
-
-  const handleRetrySuboptimal = () => {
-    const optimalBreakdown = getOptimalBreakdown(targetPriceCents);
-    let keptMoney = [];
-    let currentCounts = {};
-
-    selectedMoney.forEach(m => {
-      let valStr = String(m.value);
-      currentCounts[valStr] = (currentCounts[valStr] || 0) + 1;
-      let optVal = optimalBreakdown[valStr] || 0;
-
-      if (currentCounts[valStr] <= optVal) {
-        keptMoney.push(m);
-      }
-    });
-
-    setSelectedMoney(keptMoney);
-    setFeedback(null);
-  };
-
-  const currentTotalCents = selectedMoney.reduce((sum, item) => sum + item.value, 0);
-  const isHiddenTotal = currentLevel === 2;
-
-  // --- 畫面渲染 ---
-
-  if (gameState === 'menu') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-sky-300 to-sky-100 font-sans select-none flex flex-col items-center justify-end overflow-hidden pt-6 px-4 pb-0 relative">
-        <div className="absolute top-10 left-10 md:left-20 text-yellow-400 text-6xl md:text-8xl drop-shadow-lg opacity-90 animate-[spin_20s_linear_infinite]">☀️</div>
-        <div className="absolute top-24 right-10 md:right-32 text-white text-5xl md:text-7xl opacity-80 drop-shadow-md">☁️</div>
-        <div className="absolute top-48 left-1/4 text-white text-4xl md:text-6xl opacity-60 drop-shadow-md">☁️</div>
-
-        <div className="w-full max-w-5xl flex flex-col items-center relative z-10">
-          <div className="w-full bg-gradient-to-r from-pink-500 via-rose-500 to-pink-500 rounded-t-[3rem] border-4 border-rose-700 p-6 md:p-8 text-center shadow-[0_-10px_20px_rgba(0,0,0,0.15)] relative overflow-hidden">
-             <div className="absolute top-0 left-0 w-full h-full bg-white/10" style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.2) 10%, transparent 10%)', backgroundSize: '20px 20px' }}></div>
-             <h1 className="text-4xl md:text-6xl font-black text-white drop-shadow-[0_4px_4px_rgba(0,0,0,0.4)] tracking-widest relative z-10">
-               安博百貨公司
-             </h1>
-             <div className="mt-3 inline-block bg-yellow-300 text-rose-800 px-6 py-2 rounded-full font-black text-xl md:text-2xl shadow-md border-2 border-yellow-500 relative z-10">
-                ⚡ 收銀速度挑戰賽 ⚡
-             </div>
-          </div>
-          
-          <div className="w-[105%] h-8 md:h-10 z-20 -mt-2 shadow-lg" style={{ backgroundImage: 'repeating-linear-gradient(45deg, #fbbf24, #fbbf24 40px, #ef4444 40px, #ef4444 80px)', borderRadius: '0 0 15px 15px' }}></div>
-
-          <div className="w-[98%] bg-amber-50 border-x-[16px] border-indigo-400 p-6 md:p-10 flex flex-col md:flex-row gap-8 shadow-2xl relative z-10 rounded-b-sm">
-             <div className="flex-1 bg-white rounded-2xl p-6 border-4 border-indigo-200 shadow-sm relative overflow-hidden">
-                <div className="absolute -right-6 -bottom-6 text-8xl opacity-10">🛍️</div>
-                <h3 className="font-black text-2xl mb-4 text-indigo-800 flex items-center gap-2">
-                  <Flame className="text-orange-500"/> 遊戲規則：
-                </h3>
-                <ul className="list-disc pl-6 space-y-3 font-bold text-gray-700 text-lg">
-                  <li>可使用**紙幣**及**硬幣**付款。</li>
-                  <li>必須使用<span className="text-red-500 underline decoration-red-400 decoration-4">最少數量</span>的貨幣組合結帳！</li>
-                  <li><strong>關卡 1</strong>：清楚提供所有付款金額資訊。</li>
-                  <li><strong>關卡 2</strong>：注意：<span className="text-red-500">不會</span>顯示目標金額！必須自己看著標籤心算。</li>
-                </ul>
-             </div>
-
-             <div className="flex-1 flex flex-col justify-center space-y-5">
-                <input 
-                  type="text" 
-                  placeholder="請輸入挑戰者姓名" 
-                  value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
-                  className="w-full text-center text-3xl font-black p-5 border-4 border-indigo-200 rounded-2xl focus:outline-none focus:border-indigo-500 transition-colors bg-white shadow-sm"
-                />
-                <button 
-                  onClick={startChallenge}
-                  className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white p-5 rounded-2xl text-2xl font-black transition-all shadow-lg flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95"
-                >
-                  <Play fill="currentColor" size={28} /> 開始挑戰
-                </button>
-                <button 
-                  onClick={() => setGameState('leaderboard')}
-                  className="w-full bg-gradient-to-r from-yellow-400 to-yellow-500 hover:from-yellow-500 hover:to-yellow-600 text-yellow-900 p-5 rounded-2xl text-xl font-black transition-all shadow-md flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95 border-2 border-yellow-600"
-                >
-                  <Trophy size={24} /> 查看2B排行榜
-                </button>
-             </div>
-          </div>
-
-          <div className="w-[98%] h-24 md:h-32 bg-slate-100 border-x-[16px] border-b-[16px] border-indigo-400 flex justify-center items-end pb-0 rounded-b-[2rem] shadow-2xl relative z-10">
-             <div className="w-56 md:w-80 h-20 md:h-28 bg-cyan-800 border-t-8 border-x-8 border-indigo-500 rounded-t-3xl flex relative overflow-hidden shadow-inner">
-                <div className="w-1/2 h-full border-r-[3px] border-cyan-950 bg-cyan-600/70 flex items-center justify-center relative">
-                  <div className="absolute top-2 bottom-2 right-2 border-2 border-white/30 rounded-lg w-full"></div>
-                  <div className="w-10 h-10 border-4 border-white/50 rounded-full flex items-center justify-end pr-1 z-10"><div className="w-2 h-8 bg-white/40 rounded-full"></div></div>
-                </div>
-                <div className="w-1/2 h-full border-l-[3px] border-cyan-950 bg-cyan-600/70 flex items-center justify-center relative">
-                  <div className="absolute top-2 bottom-2 left-2 border-2 border-white/30 rounded-lg w-full"></div>
-                  <div className="w-10 h-10 border-4 border-white/50 rounded-full flex items-center justify-start pl-1 z-10"><div className="w-2 h-8 bg-white/40 rounded-full"></div></div>
-                </div>
-             </div>
-             <div className="absolute bottom-0 left-8 md:left-16 text-6xl md:text-7xl drop-shadow-md">🪴</div>
-             <div className="absolute bottom-0 right-8 md:right-16 text-6xl md:text-7xl drop-shadow-md">🪴</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (gameState === 'transition') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-orange-100 to-red-100 font-sans select-none flex flex-col items-center justify-center p-4 relative">
-        <div className="bg-white p-8 md:p-12 rounded-3xl shadow-2xl max-w-xl w-full text-center border-4 border-red-500 relative z-10 animate-in zoom-in duration-500">
-          <Flame size={80} className="text-red-500 mx-auto mb-4 drop-shadow-lg animate-pulse" />
-          <h1 className="text-4xl md:text-5xl font-extrabold text-red-600 mb-4 tracking-wider">難度升級！</h1>
-          <div className="bg-red-50 rounded-xl p-6 my-6 border-2 border-red-200 shadow-inner text-left">
-            <p className="text-xl md:text-2xl text-gray-800 font-black mb-3">
-              進入 <strong>關卡 2 (心算挑戰)</strong> 🧠
-            </p>
-            <p className="text-lg md:text-xl text-red-600 font-black bg-white p-4 rounded-xl border-2 border-red-200 mb-3 flex items-center gap-3">
-              <span className="text-3xl">⚠️</span> 
-              <span>注意：<span className="underline decoration-red-400 decoration-4">不會</span>顯示目標金額！必須看著標價計算。</span>
-            </p>
-            <p className="text-lg md:text-xl text-gray-700 font-bold">
-              請在心裡默默加上你放入的每一張紙幣和硬幣，挑戰極限！💪
-            </p>
-          </div>
-          <button 
-            onClick={() => startLevel(2)} 
-            className="w-full bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white p-5 rounded-2xl text-2xl font-bold transition-transform transform hover:scale-105 active:scale-95 shadow-xl flex justify-center items-center gap-2"
-          >
-            我準備好了！繼續計時 🚀
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (gameState === 'result') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-blue-50 to-blue-100 font-sans select-none flex flex-col items-center justify-center p-4 relative overflow-hidden">
-        <div className="bg-white p-8 md:p-12 rounded-3xl shadow-2xl max-w-lg w-full text-center border-4 border-yellow-400 relative z-10">
-          <Star size={100} className="text-yellow-400 mx-auto mb-4 fill-current drop-shadow-lg animate-bounce" />
-          <h1 className="text-4xl md:text-5xl font-extrabold text-gray-800 mb-2">挑戰完成！</h1>
-          <p className="text-2xl text-blue-600 font-black mb-6">太棒了，{studentName}！</p>
-          <div className="bg-blue-50 rounded-xl p-6 my-6 border-2 border-blue-100 shadow-inner">
-            <p className="text-xl text-gray-500 font-bold mb-2">你的最終成績：</p>
-            <div className="text-5xl md:text-6xl font-black text-red-500 tracking-wider">
-              {formatTime(elapsedTime)}
-            </div>
-            <p className="text-sm text-gray-400 mt-2 font-bold">(已記錄至排行榜)</p>
-          </div>
-          <div className="space-y-4">
-            <button 
-              onClick={() => { setElapsedTime(0); startLevel(1); }}
-              className="w-full bg-blue-500 hover:bg-blue-600 text-white p-4 rounded-xl text-xl md:text-2xl font-bold transition-all shadow-lg flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95"
-            >
-              <RefreshCcw size={24} /> 重新挑戰一次
-            </button>
-            <button 
-              onClick={() => setGameState('leaderboard')}
-              className="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 p-4 rounded-xl text-xl md:text-2xl font-bold transition-all shadow-lg flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95"
-            >
-              <Trophy size={24} /> 查看2B排行榜
-            </button>
-            <button 
-              onClick={() => { setStudentName(''); setGameState('menu'); }}
-              className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 p-4 rounded-xl text-xl font-bold transition-all shadow-md flex justify-center items-center gap-2 active:scale-95"
-            >
-              <Store size={20} /> 返回主選單
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (gameState === 'leaderboard') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-yellow-200 to-yellow-50 font-sans select-none flex flex-col items-center justify-center p-4">
-         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-2xl max-w-lg w-full text-center border-4 border-yellow-400">
-          <Trophy size={80} className="text-yellow-500 mx-auto mb-4 drop-shadow-md" />
-          <h1 className="text-4xl font-black text-gray-800 mb-6">2B排行榜</h1>
-          <div className="bg-yellow-50 rounded-xl border-2 border-yellow-200 overflow-hidden mb-6 max-h-[50vh] overflow-y-auto shadow-inner">
-            <table className="w-full text-left">
-              <thead className="bg-yellow-200 text-yellow-900 sticky top-0 shadow-sm">
-                <tr>
-                  <th className="p-3 text-center">排名</th>
-                  <th className="p-3">挑戰者</th>
-                  <th className="p-3 text-right">完成時間</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leaderboard.map((record, index) => (
-                  <tr key={index} className="border-b border-yellow-100 last:border-0 hover:bg-yellow-100 transition-colors">
-                    <td className="p-3 text-center font-bold text-2xl">
-                      {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : <span className="text-gray-500 text-lg">{index + 1}</span>}
-                    </td>
-                    <td className="p-3 font-bold text-gray-800 text-lg">{record.name}</td>
-                    <td className="p-3 text-right font-mono font-black text-blue-600 text-lg">{formatTime(record.time)}</td>
-                  </tr>
-                ))}
-                {leaderboard.length === 0 && (
-                  <tr>
-                    <td colSpan="3" className="p-8 text-center text-gray-500 font-bold">目前還沒有紀錄，快成為第一位挑戰者！</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <button 
-            onClick={() => setGameState('menu')}
-            className="w-full bg-blue-500 hover:bg-blue-600 text-white p-4 rounded-xl text-xl font-bold transition-all shadow-lg flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95"
-          >
-            <ArrowLeft size={24} /> 返回主選單
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // --- Playing 狀態 ---
-  return (
-    <div className="min-h-screen bg-sky-50 font-sans select-none flex flex-col h-screen overflow-hidden">
-      {/* 頂部導航 */}
-      <div className="bg-white shadow-sm px-4 py-3 flex justify-between items-center z-10 shrink-0 border-b-4 border-sky-200">
-        <button onClick={() => setGameState('menu')} className="flex items-center gap-2 text-gray-500 hover:text-red-500 transition-colors px-2 py-1 rounded-lg hover:bg-red-50 text-lg font-bold">
-          <ArrowLeft size={24} /> 放棄
-        </button>
-        <div className="text-xl md:text-3xl font-black text-blue-800 tracking-wider flex items-center gap-2">
-          關卡 {currentLevel} <span className="text-gray-400 hidden md:inline">|</span> <span className="text-lg md:text-2xl text-blue-600">{currentLevel === 1 ? '直接付款' : '心算挑戰'}</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-base md:text-lg font-bold shadow-inner">
-            題 {questionCount}/{QUESTIONS_PER_LEVEL}
-          </div>
-          <div className="bg-gray-800 text-green-400 font-mono px-4 py-1.5 rounded-lg text-xl md:text-2xl font-black shadow-inner flex items-center gap-2 w-32 justify-center">
-            <Clock size={20} className="text-gray-400" />
-            {formatTime(elapsedTime)}
-          </div>
-        </div>
-      </div>
-
-      {/* 主要遊戲區域 */}
-      <div className="flex-1 flex flex-col p-2 md:p-4 gap-3 md:gap-4 overflow-hidden">
-        
-        {/* 上半部：購買物品與托盤 */}
-        <div className="flex flex-col md:flex-row gap-3 md:gap-4 h-[50%] shrink-0">
-          
-          {/* 左上：本次購買單一物品 */}
-          <div className="w-full md:w-1/3 bg-white rounded-2xl shadow-md border-2 border-sky-200 p-4 flex flex-col relative overflow-hidden shrink-0">
-            <div className="absolute top-3 left-3 bg-sky-100 text-sky-800 px-3 py-1 rounded-lg font-bold text-sm md:text-base flex items-center gap-1 shadow-sm">
-              <ShoppingCart size={16} /> 本次購買物品
-            </div>
+        // --- 常量與資料設定 ---
+        const CURRENCIES = [
+            // 紙幣
+            { value: 500, label: '$500', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/500_Hong_Kong_dollars_Standard_Chartered_Bank_2010_obverse.jpg/800px-500_Hong_Kong_dollars_Standard_Chartered_Bank_2010_obverse.jpg' },
+            { value: 100, label: '$100', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/100_Hong_Kong_dollars_HSBC_2010_obverse.jpg/800px-100_Hong_Kong_dollars_HSBC_2010_obverse.jpg' },
+            { value: 50, label: '$50', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/50_Hong_Kong_dollars_Bank_of_China_2010_obverse.jpg/800px-50_Hong_Kong_dollars_Bank_of_China_2010_obverse.jpg' },
+            { value: 20, label: '$20', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/20_Hong_Kong_dollars_Standard_Chartered_Bank_2010_obverse.jpg/800px-20_Hong_Kong_dollars_Standard_Chartered_Bank_2010_obverse.jpg' },
+            { value: 10, label: '$10', type: 'note', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/10_Hong_Kong_dollars_Hong_Kong_Government_2007_obverse.jpg/800px-10_Hong_Kong_dollars_Hong_Kong_Government_2007_obverse.jpg' },
             
-            <div className="flex-1 flex flex-col items-center justify-center mt-6">
-              <span className="text-8xl md:text-9xl drop-shadow-md hover:scale-110 transition-transform cursor-default">
-                {currentItem?.emoji}
-              </span>
-              <div className="flex items-center gap-3 mt-4">
-                <span className="text-2xl md:text-4xl font-bold text-gray-700">{currentItem?.name}</span>
-                <span className="bg-yellow-100 text-yellow-800 border-2 border-yellow-300 px-3 py-1 rounded-lg text-xl md:text-2xl font-black shadow-sm">
-                  ${formatMoneyDisplay(targetPriceCents)}
-                </span>
-              </div>
-            </div>
+            // 硬幣 (無圖片，使用 CSS 樣式)
+            { value: 10, label: '拾圓', type: 'coin', img: '' },
+            { value: 5, label: '伍圓', type: 'coin', img: '' },
+            { value: 2, label: '貳圓', type: 'coin', img: '' },
+            { value: 1, label: '壹圓', type: 'coin', img: '' },
+            { value: 0.5, label: '伍毫', type: 'coin', img: '' },
+            { value: 0.2, label: '貳毫', type: 'coin', img: '' },
+            { value: 0.1, label: '壹毫', type: 'coin', img: '' },
+        ];
 
-            <div className="mt-4 bg-amber-50 border-4 border-amber-300 rounded-xl px-4 py-3 w-full shadow-inner text-center">
-              <p className="text-amber-800 text-sm md:text-base font-black mb-0">應付總額</p>
-              <p className="text-4xl md:text-5xl font-black text-amber-600 tracking-tighter">
-                {isHiddenTotal ? '???' : `$${formatMoneyDisplay(targetPriceCents)}`}
-              </p>
-            </div>
-          </div>
+        const ITEMS = [
+            { name: '玩具熊', emoji: '🧸' }, { name: '書包', emoji: '🎒' },
+            { name: '故事書', emoji: '📘' }, { name: 'T恤', emoji: '👕' },
+            { name: '波鞋', emoji: '👟' }, { name: '手錶', emoji: '⌚' },
+            { name: '拼圖', emoji: '🧩' }, { name: '顏色筆', emoji: '🖍️' },
+            { name: '畫板', emoji: '🎨' }, { name: '足球', emoji: '⚽' },
+            { name: '水樽', emoji: '💧' }, { name: '筆盒', emoji: '🧃' },
+            { name: '遙控車', emoji: '🏎️' }, { name: '耳機', emoji: '🎧' },
+            { name: '滑板', emoji: '🛹' }
+        ];
 
-          {/* 右上：付費區 */}
-          <div className="w-full md:w-2/3 bg-emerald-50 rounded-2xl shadow-md border-2 border-emerald-300 p-4 flex flex-col relative">
-            <div className="flex justify-between items-center mb-2 shrink-0">
-              <h2 className="text-xl md:text-2xl font-bold text-emerald-800 flex items-center gap-2">
-                <ShoppingBag className="text-emerald-500" /> 付款托盤
-              </h2>
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={clearMoney}
-                  className="text-red-500 hover:text-red-700 flex items-center gap-1 font-bold text-base md:text-lg p-1.5 md:p-2 rounded-lg hover:bg-red-50 transition-colors"
-                >
-                  <Trash2 size={18} /> 清空
-                </button>
-                <div className="bg-white px-4 py-1.5 rounded-lg border-2 border-emerald-200 text-right shadow-sm flex items-baseline gap-2 relative min-w-[140px] justify-between">
-                  <span className="text-gray-500 text-sm md:text-base font-bold">已放入:</span>
-                  <span className={`text-2xl md:text-3xl font-black ${isHiddenTotal ? 'text-gray-400' : 'text-emerald-600'}`}>
-                    {isHiddenTotal ? '???' : `$${formatMoneyDisplay(currentTotalCents)}`}
-                  </span>
-                </div>
-              </div>
-            </div>
+        const QUESTIONS_PER_LEVEL = 3;
 
-            {/* 放錢的盤子 */}
-            <div className="flex-1 bg-white rounded-xl border-2 border-dashed border-emerald-400 p-3 md:p-4 flex flex-wrap content-start gap-2 md:gap-3 overflow-y-auto shadow-inner">
-              {selectedMoney.length === 0 && (
-                <div className="w-full h-full flex items-center justify-center text-emerald-300/70 text-lg md:text-2xl font-bold pointer-events-none text-center px-4">
-                  {isHiddenTotal ? "請將所需錢幣放入，不要忘記加總喔！" : "請從下方錢包選擇紙幣和硬幣"}
-                </div>
-              )}
-              {selectedMoney.map((money) => (
-                <MoneyItem 
-                  key={money.instanceId} 
-                  money={money} 
-                  onClick={() => removeMoney(money.instanceId)} 
-                />
-              ))}
-            </div>
+        // --- 備用樣式 ---
+        const FALLBACK_COLORS = {
+            500: 'bg-yellow-700 text-white',
+            100: 'bg-red-500 text-white',
+            50: 'bg-emerald-600 text-white',
+            20: 'bg-blue-500 text-white',
+            10: 'bg-purple-600 text-white'
+        };
 
-            <div className="absolute -bottom-5 right-2 md:right-6 z-20">
-              <button 
-                onClick={checkPayment}
-                disabled={selectedMoney.length === 0 || feedback !== null}
-                className={`px-8 py-3 md:px-12 md:py-4 rounded-full text-xl md:text-2xl font-black text-white shadow-xl transform transition-all border-4 border-white ${
-                  selectedMoney.length === 0 || feedback !== null
-                    ? 'bg-gray-400 cursor-not-allowed border-gray-200' 
-                    : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:scale-105 active:scale-95 hover:shadow-2xl'
-                }`}
-              >
-                確認結帳
-              </button>
-            </div>
-          </div>
-        </div>
+        // 避免浮點數誤差的四捨五入函數 (保留一位小數)
+        const roundDec = (num) => Math.round(num * 10) / 10;
 
-        {/* 下半部：我的錢包區 */}
-        <div className="flex-1 bg-white rounded-2xl shadow-md border-2 border-sky-200 p-4 flex flex-col overflow-hidden relative">
-            <div className="flex justify-between items-center mb-3 shrink-0 border-b-2 border-sky-100 pb-2">
-                <h2 className="text-xl md:text-2xl font-bold text-sky-800 flex items-center gap-2">
-                    <Wallet className="text-sky-500" /> 我的錢包
-                </h2>
-                <span className="text-sm md:text-base text-sky-600 font-bold bg-sky-50 px-3 py-1 rounded-full border border-sky-200">
-                    👇 點擊加入托盤
-                </span>
-            </div>
+        // 計算紙幣+硬幣的最佳組合 (採用乘10避開浮點數誤差)
+        const getOptimalBreakdown = (amount) => {
+            let available = [500, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1];
+            let breakdown = {};
+            let remainingCents = Math.round(amount * 10);
             
-            <div className="flex-1 overflow-y-auto pr-2 space-y-4 pb-4">
-                {/* 紙幣區 */}
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                   <h3 className="text-base text-slate-500 font-bold mb-3">📄 紙幣 (Banknotes)</h3>
-                   <div className="flex flex-wrap gap-2 md:gap-3">
-                      {MONEY_ASSETS.filter(m=>m.type==='note').map(m => (
-                         <MoneyItem key={m.id} money={m} onClick={() => addMoney(m)} isSelectable={true} />
-                      ))}
-                   </div>
-                </div>
+            for (let denom of available) {
+                let denomCents = Math.round(denom * 10);
+                if (remainingCents >= denomCents) {
+                    let num = Math.floor(remainingCents / denomCents);
+                    breakdown[denom] = num;
+                    remainingCents -= num * denomCents;
+                }
+            }
+            return breakdown;
+        };
+
+        // 產生改善提示
+        const getImprovementHint = (userMoney, optimalBreakdown) => {
+            let userCounts = {};
+            userMoney.forEach(m => {
+                let valStr = String(m.value);
+                userCounts[valStr] = (userCounts[valStr] || 0) + 1;
+            });
+            
+            let inefficientDenoms = [];
+            for (let val in userCounts) {
+                let optVal = optimalBreakdown[val] || 0;
+                if (userCounts[val] > optVal) {
+                    inefficientDenoms.push(Number(val));
+                }
+            }
+            
+            if (inefficientDenoms.length > 0) {
+                inefficientDenoms.sort((a,b) => a - b);
+                let target = inefficientDenoms[0];
+                let unit = target >= 1 ? '面額' : '硬幣';
+                return `💡 提示：試試看把多個 $${target} 換成更大的${unit}吧！系統已幫你刪除多餘的部分囉。`;
+            }
+            return "💡 提示：你可以用更少的數量來付款喔！系統已幫你退回多餘的部分。";
+        };
+
+        // 智能題庫生成器：加入小數點，並確保包含紙幣與硬幣的使用
+        const generateLevelPrices = () => {
+            let attempts = 0;
+            while (attempts < 2000) {
+                let prices = [];
+                let usedDenoms = new Set();
                 
-                {/* 硬幣區 */}
-                <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-100">
-                   <h3 className="text-base text-amber-600/70 font-bold mb-3">🪙 硬幣 (Coins)</h3>
-                   <div className="flex flex-wrap gap-3 md:gap-4 items-center">
-                      {MONEY_ASSETS.filter(m=>m.type==='coin').map(m => (
-                         <MoneyItem key={m.id} money={m} onClick={() => addMoney(m)} isSelectable={true} />
-                      ))}
-                   </div>
+                for (let i = 0; i < QUESTIONS_PER_LEVEL; i++) {
+                    let p = 0;
+                    let breakdown = {};
+                    let isValidPrice = false;
+                    
+                    while (!isValidPrice) {
+                        if (i === 0) {
+                            // 大金額: 500 - 990 (可能帶小數)
+                            p = 500 + Math.floor(Math.random() * 490) + (Math.floor(Math.random() * 10) / 10);
+                        } else if (i === 1) {
+                            // 中金額: 50 - 490 (可能帶小數)
+                            p = 50 + Math.floor(Math.random() * 440) + (Math.floor(Math.random() * 10) / 10);
+                        } else {
+                            // 小金額: 0.1 - 49 (包含小數)
+                            p = (Math.floor(Math.random() * 490) + 1) / 10;
+                        }
+                        
+                        p = roundDec(p);
+                        breakdown = getOptimalBreakdown(p);
+                        let noteCount = Object.values(breakdown).reduce((sum, val) => sum + val, 0);
+                        
+                        // 確保最少兩件組合，且不超過 1000
+                        if (noteCount >= 2 && p <= 1000 && p > 0) {
+                            isValidPrice = true;
+                        }
+                    }
+                    
+                    prices.push(p);
+                    Object.keys(breakdown).forEach(d => usedDenoms.add(Number(d)));
+                }
+                
+                prices.sort(() => Math.random() - 0.5);
+                let uniquePrices = new Set(prices);
+                if (uniquePrices.size < QUESTIONS_PER_LEVEL) {
+                    attempts++;
+                    continue;
+                }
+                
+                // 條件：紙鈔至少用到 3 種以上，硬幣至少用到 2 種以上
+                let notesUsed = [500, 100, 50, 20, 10].filter(d => usedDenoms.has(d)).length;
+                let coinsUsed = [5, 2, 1, 0.5, 0.2, 0.1].filter(d => usedDenoms.has(d)).length;
+                
+                if (notesUsed >= 3 && coinsUsed >= 2) {
+                    return prices;
+                }
+                attempts++;
+            }
+            return [680.5, 275.2, 48.9].sort(() => Math.random() - 0.5);
+        };
+
+        const formatTime = (ms) => {
+            const totalSeconds = ms / 1000;
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = Math.floor(totalSeconds % 60);
+            const tenths = Math.floor((totalSeconds * 10) % 10);
+            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${tenths}`;
+        };
+
+        // --- UI 組件 ---
+        const MoneyItem = ({ money, onClick, isSelectable = true }) => {
+            const [imgFailed, setImgFailed] = useState(false);
+            const isCoin = money.type === 'coin';
+            
+            const baseClasses = `flex items-center justify-center shadow-sm transition-transform duration-200 shrink-0 select-none ${isSelectable ? 'cursor-pointer hover:-translate-y-1 hover:shadow-lg active:scale-95' : ''}`;
+            
+            if (imgFailed || !money.img) {
+                if (isCoin) {
+                    // 硬幣 CSS 樣式
+                    let coinStyle = "";
+                    if (money.value === 10) { // 雙色拾圓
+                        coinStyle = "bg-yellow-200 border-4 border-gray-300 text-yellow-800";
+                    } else if (money.value >= 1) { // 銀色硬幣
+                        coinStyle = "bg-gradient-to-br from-gray-100 to-gray-400 text-gray-800 border-2 border-gray-500";
+                    } else { // 銅色硬幣
+                        coinStyle = "bg-gradient-to-br from-yellow-300 to-yellow-600 text-yellow-950 border-2 border-yellow-700";
+                    }
+
+                    // 波浪邊(貳圓/貳毫)
+                    const isWavy = money.value === 2 || money.value === 0.2;
+                    const radiusClass = isWavy ? "rounded-[40%]" : "rounded-full";
+
+                    return (
+                        <div onClick={onClick} className={`${baseClasses} w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 ${radiusClass} font-black text-sm md:text-base flex flex-col items-center justify-center coin-shadow ${coinStyle}`}>
+                            <span>{money.label}</span>
+                        </div>
+                    );
+                } else {
+                    // 紙幣 CSS 樣式
+                    return (
+                        <div onClick={onClick} className={`${baseClasses} w-24 h-12 sm:w-28 sm:h-14 md:w-32 md:h-16 rounded-md border-2 border-white/30 font-bold text-lg md:text-xl ${FALLBACK_COLORS[money.value] || 'bg-gray-600 text-white'}`}>
+                            {money.label}
+                        </div>
+                    );
+                }
+            }
+            
+            const shapeClass = isCoin ? "w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 rounded-full object-cover" : "h-12 sm:h-14 md:h-16 w-auto rounded-md object-cover";
+            return (
+                <img src={money.img} alt={money.label} onClick={onClick} draggable={false} onError={() => setImgFailed(true)} className={`${baseClasses} ${shapeClass} border border-gray-200 bg-white`} />
+            );
+        };
+
+        const App = () => {
+            const [gameState, setGameState] = useState('menu');
+            const [studentName, setStudentName] = useState('');
+            
+            const [currentLevel, setCurrentLevel] = useState(1);
+            const [questionCount, setQuestionCount] = useState(1);
+            const [roundPrices, setRoundPrices] = useState([]);
+            const [currentItem, setCurrentItem] = useState(null);
+            const [targetPrice, setTargetPrice] = useState(0);
+            const [selectedMoney, setSelectedMoney] = useState([]);
+            
+            const [feedback, setFeedback] = useState(null);
+            const [suboptimalHint, setSuboptimalHint] = useState("");
+            
+            const [elapsedTime, setElapsedTime] = useState(0);
+            const [isTimerRunning, setIsTimerRunning] = useState(false);
+            const [leaderboard, setLeaderboard] = useState([]);
+
+            useEffect(() => {
+                try {
+                    const saved = localStorage.getItem('paperMoneySpeedLeaderboard');
+                    if (saved) setLeaderboard(JSON.parse(saved));
+                } catch(e) {}
+            }, []);
+
+            useEffect(() => {
+                let interval;
+                if (isTimerRunning) {
+                    interval = setInterval(() => {
+                        setElapsedTime(prev => prev + 100);
+                    }, 100);
+                }
+                return () => clearInterval(interval);
+            }, [isTimerRunning]);
+
+            const startChallenge = () => {
+                if (!studentName.trim()) {
+                    alert("請先輸入名字！");
+                    return;
+                }
+                setElapsedTime(0);
+                startLevel(1);
+            };
+
+            const startLevel = (level) => {
+                const prices = generateLevelPrices();
+                setRoundPrices(prices);
+                setCurrentLevel(level);
+                loadQuestion(1, prices[0]);
+                setGameState('playing');
+                setIsTimerRunning(true);
+            };
+
+            const loadQuestion = (qIndex, price) => {
+                setQuestionCount(qIndex);
+                setTargetPrice(price);
+                const randomItem = ITEMS[Math.floor(Math.random() * ITEMS.length)];
+                setCurrentItem(randomItem);
+                setSelectedMoney([]);
+                setFeedback(null);
+                setSuboptimalHint("");
+            };
+
+            const addMoney = (moneyTemplate) => {
+                if (feedback !== null) return;
+                const newMoneyInstance = { ...moneyTemplate, id: Date.now() + Math.random() };
+                setSelectedMoney([...selectedMoney, newMoneyInstance]);
+            };
+
+            const removeMoney = (idToRemove) => {
+                if (feedback !== null) return;
+                setSelectedMoney(selectedMoney.filter(m => m.id !== idToRemove));
+            };
+
+            const clearMoney = () => {
+                if (feedback !== null) return;
+                setSelectedMoney([]);
+            };
+
+            const checkPayment = () => {
+                // 精確加總避免浮點誤差
+                const currentTotal = roundDec(selectedMoney.reduce((sum, item) => sum + item.value, 0));
+                
+                if (Math.abs(currentTotal - targetPrice) > 0.01) {
+                    setFeedback('wrong');
+                    setTimeout(() => setFeedback(null), 1500);
+                    return;
+                }
+
+                const optimalBreakdown = getOptimalBreakdown(targetPrice);
+                const optimalCount = Object.values(optimalBreakdown).reduce((a, b) => a + b, 0);
+
+                if (selectedMoney.length > optimalCount) {
+                    const hintText = getImprovementHint(selectedMoney, optimalBreakdown);
+                    setSuboptimalHint(hintText);
+                    setFeedback('suboptimal');
+                    return; 
+                }
+
+                setFeedback('correct');
+                setTimeout(() => {
+                    if (questionCount < QUESTIONS_PER_LEVEL) {
+                        loadQuestion(questionCount + 1, roundPrices[questionCount]);
+                    } else {
+                        if (currentLevel === 1) {
+                            setIsTimerRunning(false);
+                            setFeedback(null);
+                            setGameState('transition');
+                        } else {
+                            setIsTimerRunning(false);
+                            finishGame();
+                        }
+                    }
+                }, 1500);
+            };
+
+            const finishGame = () => {
+                const finalTime = elapsedTime;
+                const newRecord = { name: studentName, time: finalTime, date: new Date().toLocaleDateString() };
+                const updatedLeaderboard = [...leaderboard, newRecord].sort((a, b) => a.time - b.time);
+                
+                setLeaderboard(updatedLeaderboard);
+                try {
+                    localStorage.setItem('paperMoneySpeedLeaderboard', JSON.stringify(updatedLeaderboard));
+                } catch(e) {}
+                
+                setGameState('result');
+                setFeedback(null);
+            };
+
+            const handleRetrySuboptimal = () => {
+                const optimalBreakdown = getOptimalBreakdown(targetPrice);
+                let keptMoney = [];
+                let currentCounts = {};
+
+                selectedMoney.forEach(m => {
+                    let valStr = String(m.value);
+                    currentCounts[valStr] = (currentCounts[valStr] || 0) + 1;
+                    let optVal = optimalBreakdown[valStr] || 0;
+
+                    if (currentCounts[valStr] <= optVal) {
+                        keptMoney.push(m);
+                    }
+                });
+
+                setSelectedMoney(keptMoney);
+                setFeedback(null);
+            };
+
+            const currentTotal = roundDec(selectedMoney.reduce((sum, item) => sum + item.value, 0));
+            const isHiddenTotal = currentLevel === 2;
+
+            if (gameState === 'menu') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-b from-sky-300 to-sky-100 font-sans select-none flex flex-col items-center justify-end overflow-hidden pt-6 px-4 pb-0 relative">
+                        <div className="absolute top-10 left-10 md:left-20 text-yellow-400 text-6xl md:text-8xl drop-shadow-lg opacity-90 animate-[spin_20s_linear_infinite]">☀️</div>
+                        <div className="absolute top-24 right-10 md:right-32 text-white text-5xl md:text-7xl opacity-80 drop-shadow-md">☁️</div>
+                        <div className="absolute top-48 left-1/4 text-white text-4xl md:text-6xl opacity-60 drop-shadow-md">☁️</div>
+
+                        <div className="w-full max-w-4xl flex flex-col items-center relative z-10">
+                            <div className="w-full bg-gradient-to-r from-pink-500 via-rose-500 to-pink-500 rounded-t-[3rem] border-4 border-rose-700 p-6 md:p-8 text-center shadow-[0_-10px_20px_rgba(0,0,0,0.15)] relative overflow-hidden">
+                                 <div className="absolute top-0 left-0 w-full h-full bg-white/10" style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.2) 10%, transparent 10%)', backgroundSize: '20px 20px' }}></div>
+                                 <h1 className="text-4xl md:text-6xl font-black text-white drop-shadow-[0_4px_4px_rgba(0,0,0,0.4)] tracking-widest relative z-10">
+                                     安博百貨公司
+                                 </h1>
+                                 <div className="mt-3 inline-block bg-yellow-300 text-rose-800 px-6 py-2 rounded-full font-black text-xl md:text-2xl shadow-md border-2 border-yellow-500 relative z-10 flex items-center gap-2 justify-center">
+                                     <Icons.Flame size={28} className="text-rose-600" /> 紙幣及硬幣付款挑戰賽
+                                 </div>
+                            </div>
+                            
+                            <div className="w-[105%] h-8 md:h-10 z-20 -mt-2 shadow-lg" style={{ backgroundImage: 'repeating-linear-gradient(45deg, #fbbf24, #fbbf24 40px, #ef4444 40px, #ef4444 80px)', borderRadius: '0 0 15px 15px' }}></div>
+
+                            <div className="w-[98%] bg-amber-50 border-x-[16px] border-indigo-400 p-6 md:p-10 flex flex-col md:flex-row gap-8 shadow-2xl relative z-10 rounded-b-sm">
+                                 <div className="flex-1 bg-white rounded-2xl p-6 border-4 border-indigo-200 shadow-sm relative overflow-hidden">
+                                     <div className="absolute -right-6 -bottom-6 text-8xl opacity-10">🛍️</div>
+                                     <h3 className="font-black text-2xl mb-4 text-indigo-800 flex items-center gap-2">
+                                         <Icons.Flame className="text-orange-500"/> 遊戲規則：
+                                     </h3>
+                                     <ul className="list-disc pl-6 space-y-3 font-bold text-gray-700 text-lg">
+                                         <li>每次只購買一件商品。</li>
+                                         <li>必須使用<span className="text-red-500 underline decoration-red-400 decoration-4">最少數量</span>的紙幣與硬幣付款！</li>
+                                         <li><strong>關卡 1</strong>：清楚提供所有付款金額資訊。</li>
+                                         <li><strong>關卡 2</strong>：注意：<span className="text-red-500">不會</span>顯示目標金額！必須自己看著標價計算。</li>
+                                     </ul>
+                                 </div>
+
+                                 <div className="flex-1 flex flex-col justify-center space-y-5">
+                                     <input 
+                                         type="text" 
+                                         placeholder="請輸入挑戰者姓名" 
+                                         value={studentName}
+                                         onChange={(e) => setStudentName(e.target.value)}
+                                         className="w-full text-center text-3xl font-black p-5 border-4 border-indigo-200 rounded-2xl focus:outline-none focus:border-indigo-500 transition-colors bg-white shadow-sm"
+                                     />
+                                     <button 
+                                         onClick={startChallenge}
+                                         className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white p-5 rounded-2xl text-2xl font-black transition-all shadow-lg flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95"
+                                     >
+                                         <Icons.Play fill="currentColor" size={28} /> 開始挑戰
+                                     </button>
+                                     <button 
+                                         onClick={() => setGameState('leaderboard')}
+                                         className="w-full bg-gradient-to-r from-yellow-400 to-yellow-500 hover:from-yellow-500 hover:to-yellow-600 text-yellow-900 p-5 rounded-2xl text-xl font-black transition-all shadow-md flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95 border-2 border-yellow-600"
+                                     >
+                                         <Icons.Trophy size={24} /> 查看2B排行榜
+                                     </button>
+                                 </div>
+                            </div>
+
+                            <div className="w-[98%] h-24 md:h-32 bg-slate-100 border-x-[16px] border-b-[16px] border-indigo-400 flex justify-center items-end pb-0 rounded-b-[2rem] shadow-2xl relative z-10">
+                                 <div className="w-56 md:w-80 h-20 md:h-28 bg-cyan-800 border-t-8 border-x-8 border-indigo-500 rounded-t-3xl flex relative overflow-hidden shadow-inner">
+                                     <div className="w-1/2 h-full border-r-[3px] border-cyan-950 bg-cyan-600/70 flex items-center justify-center relative">
+                                         <div className="absolute top-2 bottom-2 right-2 border-2 border-white/30 rounded-lg w-full"></div>
+                                         <div className="w-10 h-10 border-4 border-white/50 rounded-full flex items-center justify-end pr-1 z-10"><div className="w-2 h-8 bg-white/40 rounded-full"></div></div>
+                                     </div>
+                                     <div className="w-1/2 h-full border-l-[3px] border-cyan-950 bg-cyan-600/70 flex items-center justify-center relative">
+                                         <div className="absolute top-2 bottom-2 left-2 border-2 border-white/30 rounded-lg w-full"></div>
+                                         <div className="w-10 h-10 border-4 border-white/50 rounded-full flex items-center justify-start pl-1 z-10"><div className="w-2 h-8 bg-white/40 rounded-full"></div></div>
+                                     </div>
+                                 </div>
+                                 <div className="absolute bottom-0 left-8 md:left-16 text-6xl md:text-7xl drop-shadow-md">🪴</div>
+                                 <div className="absolute bottom-0 right-8 md:right-16 text-6xl md:text-7xl drop-shadow-md">🪴</div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'transition') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-b from-orange-100 to-red-100 font-sans select-none flex flex-col items-center justify-center p-4 relative">
+                        <div className="bg-white p-8 md:p-12 rounded-3xl shadow-2xl max-w-xl w-full text-center border-4 border-red-500 relative z-10 animate-in zoom-in duration-500">
+                            <Icons.Flame size={80} className="text-red-500 mx-auto mb-4 drop-shadow-lg animate-pulse" />
+                            <h1 className="text-4xl md:text-5xl font-extrabold text-red-600 mb-4 tracking-wider">難度升級！</h1>
+                            <div className="bg-red-50 rounded-xl p-6 my-6 border-2 border-red-200 shadow-inner text-left">
+                                <p className="text-xl md:text-2xl text-gray-800 font-black mb-3">
+                                    進入 <strong>關卡 2 (心算挑戰)</strong> 🧠
+                                </p>
+                                <p className="text-lg md:text-xl text-red-600 font-black bg-white p-4 rounded-xl border-2 border-red-200 mb-3 flex items-center gap-3">
+                                    <span className="text-3xl">⚠️</span> 
+                                    <span>注意：<span className="underline decoration-red-400 decoration-4">不會</span>顯示目標金額！必須自己看著標價計算。</span>
+                                </p>
+                                <p className="text-lg md:text-xl text-gray-700 font-bold">
+                                    請在心裡默默加上你放入的每一張紙幣及硬幣，挑戰你的心算極限！💪
+                                </p>
+                            </div>
+                            <button 
+                                onClick={() => startLevel(2)} 
+                                className="w-full bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white p-5 rounded-2xl text-2xl font-bold transition-transform transform hover:scale-105 active:scale-95 shadow-xl flex justify-center items-center gap-2"
+                            >
+                                我準備好了！繼續計時 🚀
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'result') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-blue-100 font-sans select-none flex flex-col items-center justify-center p-4 relative overflow-hidden">
+                        <div className="bg-white p-8 md:p-12 rounded-3xl shadow-2xl max-w-lg w-full text-center border-4 border-yellow-400 relative z-10">
+                            <Icons.Star size={100} className="text-yellow-400 mx-auto mb-4 fill-current drop-shadow-lg animate-bounce" />
+                            <h1 className="text-4xl md:text-5xl font-extrabold text-gray-800 mb-2">挑戰完成！</h1>
+                            <p className="text-2xl text-blue-600 font-black mb-6">太棒了，{studentName}！</p>
+                            <div className="bg-blue-50 rounded-xl p-6 my-6 border-2 border-blue-100 shadow-inner">
+                                <p className="text-xl text-gray-500 font-bold mb-2">你的最終成績：</p>
+                                <div className="text-5xl md:text-6xl font-black text-red-500 tracking-wider">
+                                    {formatTime(elapsedTime)}
+                                </div>
+                                <p className="text-sm text-gray-400 mt-2 font-bold">(已記錄至排行榜)</p>
+                            </div>
+                            <div className="space-y-4">
+                                <button onClick={() => { setElapsedTime(0); startLevel(1); }} className="w-full bg-blue-500 hover:bg-blue-600 text-white p-4 rounded-xl text-xl md:text-2xl font-bold transition-all shadow-lg flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95">
+                                    <Icons.RefreshCcw size={24} /> 重新挑戰一次
+                                </button>
+                                <button onClick={() => setGameState('leaderboard')} className="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 p-4 rounded-xl text-xl md:text-2xl font-bold transition-all shadow-lg flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95">
+                                    <Icons.Trophy size={24} /> 查看2B排行榜
+                                </button>
+                                <button onClick={() => { setStudentName(''); setGameState('menu'); }} className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 p-4 rounded-xl text-xl font-bold transition-all shadow-md flex justify-center items-center gap-2 active:scale-95">
+                                    <Icons.Store size={20} /> 返回主選單
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'leaderboard') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-b from-yellow-200 to-yellow-50 font-sans select-none flex flex-col items-center justify-center p-4">
+                         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-2xl max-w-lg w-full text-center border-4 border-yellow-400">
+                            <Icons.Trophy size={80} className="text-yellow-500 mx-auto mb-4 drop-shadow-md" />
+                            <h1 className="text-4xl font-black text-gray-800 mb-6">2B排行榜</h1>
+                            <div className="bg-yellow-50 rounded-xl border-2 border-yellow-200 overflow-hidden mb-6 max-h-[50vh] overflow-y-auto shadow-inner">
+                                <table className="w-full text-left">
+                                    <thead className="bg-yellow-200 text-yellow-900 sticky top-0 shadow-sm">
+                                        <tr>
+                                            <th className="p-3 text-center">排名</th>
+                                            <th className="p-3">挑戰者</th>
+                                            <th className="p-3 text-right">完成時間</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {leaderboard.map((record, index) => (
+                                            <tr key={index} className="border-b border-yellow-100 last:border-0 hover:bg-yellow-100 transition-colors">
+                                                <td className="p-3 text-center font-bold text-2xl">
+                                                    {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : <span className="text-gray-500 text-lg">{index + 1}</span>}
+                                                </td>
+                                                <td className="p-3 font-bold text-gray-800 text-lg">{record.name}</td>
+                                                <td className="p-3 text-right font-mono font-black text-blue-600 text-lg">{formatTime(record.time)}</td>
+                                            </tr>
+                                        ))}
+                                        {leaderboard.length === 0 && (
+                                            <tr>
+                                                <td colSpan="3" className="p-8 text-center text-gray-500 font-bold">目前還沒有紀錄，快成為第一位挑戰者！</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <button onClick={() => setGameState('menu')} className="w-full bg-blue-500 hover:bg-blue-600 text-white p-4 rounded-xl text-xl font-bold transition-all shadow-lg flex justify-center items-center gap-2 transform hover:scale-105 active:scale-95">
+                                <Icons.ArrowLeft size={24} /> 返回主選單
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            // --- Playing 狀態 ---
+            return (
+                <div className="min-h-screen bg-sky-50 font-sans select-none flex flex-col h-screen overflow-hidden">
+                    <div className="bg-white shadow-sm px-4 py-3 flex justify-between items-center z-10 shrink-0 border-b-4 border-sky-200">
+                        <button onClick={() => setGameState('menu')} className="flex items-center gap-2 text-gray-500 hover:text-red-500 transition-colors px-2 py-1 rounded-lg hover:bg-red-50 text-lg font-bold">
+                            <Icons.ArrowLeft size={24} /> 放棄
+                        </button>
+                        <div className="text-xl md:text-3xl font-black text-blue-800 tracking-wider flex items-center gap-2">
+                            關卡 {currentLevel} <span className="text-gray-400 hidden md:inline">|</span> <span className="text-lg md:text-2xl text-blue-600">{currentLevel === 1 ? '直接付款' : '心算挑戰'}</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-base md:text-lg font-bold shadow-inner hidden md:block">
+                                題 {questionCount}/{QUESTIONS_PER_LEVEL}
+                            </div>
+                            <div className="bg-gray-800 text-green-400 font-mono px-4 py-1.5 rounded-lg text-xl md:text-2xl font-black shadow-inner flex items-center gap-2 w-28 md:w-32 justify-center">
+                                <Icons.Clock size={20} className="text-gray-400 hidden md:block" />
+                                {formatTime(elapsedTime)}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col p-2 md:p-4 gap-3 md:gap-4 overflow-hidden">
+                        <div className="flex flex-col md:flex-row gap-3 md:gap-4 h-[55%] shrink-0">
+                            
+                            {/* 左上：本次購買單一物品 */}
+                            <div className="w-full md:w-1/3 bg-white rounded-2xl shadow-md border-2 border-sky-200 p-4 flex flex-col relative overflow-hidden shrink-0">
+                                <div className="absolute top-3 left-3 bg-sky-100 text-sky-800 px-3 py-1 rounded-lg font-bold text-sm md:text-base flex items-center gap-1 shadow-sm">
+                                    <Icons.ShoppingCart size={16} /> 本次購買物品
+                                </div>
+                                
+                                <div className="flex-1 flex flex-col items-center justify-center mt-6">
+                                    <span className="text-8xl md:text-9xl drop-shadow-md hover:scale-110 transition-transform cursor-default">
+                                        {currentItem?.emoji}
+                                    </span>
+                                    <div className="flex items-center gap-3 mt-4">
+                                        <span className="text-2xl md:text-4xl font-bold text-gray-700">{currentItem?.name}</span>
+                                        <span className="bg-yellow-100 text-yellow-800 border-2 border-yellow-300 px-3 py-1 rounded-lg text-xl md:text-2xl font-black shadow-sm">
+                                            ${targetPrice}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="mt-4 bg-amber-50 border-4 border-amber-300 rounded-xl px-4 py-3 w-full shadow-inner text-center">
+                                    <p className="text-amber-800 text-sm md:text-base font-black mb-0">應付總額</p>
+                                    <p className="text-4xl md:text-5xl font-black text-amber-600 tracking-tighter">
+                                        {isHiddenTotal ? '???' : `$${targetPrice}`}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* 右上：付費區 */}
+                            <div className="w-full md:w-2/3 bg-emerald-50 rounded-2xl shadow-md border-2 border-emerald-300 p-4 flex flex-col relative">
+                                <div className="flex justify-between items-center mb-2 shrink-0">
+                                    <h2 className="text-xl md:text-2xl font-bold text-emerald-800 flex items-center gap-2">
+                                        <Icons.ShoppingBag className="text-emerald-500" /> 付款托盤
+                                    </h2>
+                                    <div className="flex items-center gap-3">
+                                        <button onClick={clearMoney} className="text-red-500 hover:text-red-700 flex items-center gap-1 font-bold text-base md:text-lg p-1.5 md:p-2 rounded-lg hover:bg-red-50 transition-colors">
+                                            <Icons.Trash2 size={18} /> 清空
+                                        </button>
+                                        <div className="bg-white px-4 py-1.5 rounded-lg border-2 border-emerald-200 text-right shadow-sm flex items-baseline gap-2 relative min-w-[120px] justify-between">
+                                            <span className="text-gray-500 text-sm md:text-base font-bold">已放入:</span>
+                                            <span className={`text-2xl md:text-3xl font-black ${isHiddenTotal ? 'text-gray-400' : 'text-emerald-600'}`}>
+                                                {isHiddenTotal ? '???' : `$${currentTotal}`}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 bg-white rounded-xl border-2 border-dashed border-emerald-400 p-3 md:p-4 flex flex-wrap content-start gap-2 md:gap-3 overflow-y-auto shadow-inner mb-6 md:mb-8">
+                                    {selectedMoney.length === 0 && (
+                                        <div className="w-full h-full flex items-center justify-center text-emerald-300/70 text-lg md:text-2xl font-bold pointer-events-none text-center px-4">
+                                            {isHiddenTotal ? "請將所需紙幣及硬幣放入，不要忘記加總喔！" : "請從下方錢包選擇紙幣及硬幣放入"}
+                                        </div>
+                                    )}
+                                    {selectedMoney.map((money) => (
+                                        <MoneyItem key={money.id} money={money} onClick={() => removeMoney(money.id)} />
+                                    ))}
+                                </div>
+
+                                <div className="absolute -bottom-5 right-2 md:right-6 z-20">
+                                    <button 
+                                        onClick={checkPayment}
+                                        disabled={selectedMoney.length === 0 || feedback !== null}
+                                        className={`px-8 py-3 md:px-12 md:py-4 rounded-full text-xl md:text-2xl font-black text-white shadow-xl transform transition-all border-4 border-white ${
+                                            selectedMoney.length === 0 || feedback !== null
+                                                ? 'bg-gray-400 cursor-not-allowed border-gray-200' 
+                                                : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:scale-105 active:scale-95 hover:shadow-2xl'
+                                        }`}
+                                    >
+                                        確認結帳
+                                    </button>
+                                </div>
+
+                                {/* 回饋動畫 */}
+                                {feedback === 'correct' && (
+                                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/90 rounded-2xl">
+                                        <Icons.CheckCircle size={80} className="text-green-500 mb-2 drop-shadow-md animate-bounce" />
+                                        <span className="text-3xl font-black text-green-600">金額正確！</span>
+                                    </div>
+                                )}
+                                
+                                {feedback === 'wrong' && (
+                                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/90 rounded-2xl">
+                                        <Icons.XCircle size={80} className="text-red-500 mb-2 drop-shadow-md animate-pulse" />
+                                        <span className="text-3xl font-black text-red-600">金額不對喔！</span>
+                                        <span className="text-xl font-bold text-gray-500 mt-2">請再算一次</span>
+                                    </div>
+                                )}
+
+                                {feedback === 'suboptimal' && (
+                                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/95 rounded-2xl p-6 text-center border-4 border-orange-400">
+                                        <Icons.AlertTriangle size={70} className="text-orange-500 mb-3 drop-shadow-md" />
+                                        <span className="text-3xl font-black text-orange-600 mb-2">金額正確，但數量太多了！</span>
+                                        <p className="text-lg md:text-xl font-bold text-gray-700 bg-orange-50 p-4 rounded-xl border border-orange-200 mb-4">
+                                            {suboptimalHint}
+                                        </p>
+                                        <button onClick={handleRetrySuboptimal} className="bg-orange-500 hover:bg-orange-600 text-white px-8 py-3 rounded-full text-xl font-bold transition-all shadow-md active:scale-95">
+                                            我知道了，重新補齊！
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* 底部錢包區 */}
+                        <div className="h-[45%] bg-white rounded-t-3xl shadow-[0_-10px_20px_rgba(0,0,0,0.05)] border-t-4 border-sky-200 p-4 md:p-6 flex flex-col shrink-0">
+                            <h2 className="text-xl font-bold text-sky-800 mb-3 flex items-center gap-2">
+                                <Icons.Wallet className="text-sky-500" /> 我的錢包
+                            </h2>
+                            <div className="flex-1 overflow-y-auto space-y-4">
+                                 <div>
+                                    <h3 className="text-sm font-black text-gray-400 mb-2 tracking-widest bg-gray-50 inline-block px-3 py-1 rounded-md border border-gray-100">紙幣 (Banknotes)</h3>
+                                    <div className="flex flex-wrap gap-3">
+                                        {CURRENCIES.filter(c => c.type === 'note').map(money => (
+                                            <MoneyItem key={`note-${money.value}`} money={money} onClick={() => addMoney(money)} />
+                                        ))}
+                                    </div>
+                                 </div>
+                                 
+                                 <div>
+                                    <h3 className="text-sm font-black text-gray-400 mb-2 tracking-widest bg-gray-50 inline-block px-3 py-1 rounded-md border border-gray-100">硬幣 (Coins)</h3>
+                                    <div className="flex flex-wrap gap-3">
+                                        {CURRENCIES.filter(c => c.type === 'coin').map(money => (
+                                            <MoneyItem key={`coin-${money.value}`} money={money} onClick={() => addMoney(money)} />
+                                        ))}
+                                    </div>
+                                 </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
+            );
+        };
 
-        {/* 回饋動畫：答對 */}
-        {feedback === 'correct' && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/90 rounded-2xl animate-in fade-in zoom-in duration-300">
-            <div className="text-center">
-              <div className="w-32 h-32 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl animate-bounce">
-                <svg className="w-20 h-20 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7"></path></svg>
-              </div>
-              <h2 className="text-4xl font-black text-green-600">正確！</h2>
-            </div>
-          </div>
-        )}
-
-        {/* 回饋動畫：答錯 */}
-        {feedback === 'wrong' && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/90 rounded-2xl animate-in fade-in zoom-in duration-300">
-            <div className="text-center">
-              <div className="w-32 h-32 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl animate-shake">
-                <svg className="w-20 h-20 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M6 18L18 6M6 6l12 12"></path></svg>
-              </div>
-              <h2 className="text-4xl font-black text-red-600">哎呀，金額不對喔！</h2>
-            </div>
-          </div>
-        )}
-
-        {/* 回饋動畫：次優解 (張數太多) */}
-        {feedback === 'suboptimal' && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-orange-100/90 rounded-2xl p-6 animate-in fade-in zoom-in duration-300">
-            <div className="text-center bg-white p-6 md:p-10 rounded-2xl shadow-2xl border-4 border-orange-400 max-w-lg">
-              <AlertTriangle size={80} className="text-orange-500 mx-auto mb-6 animate-bounce" />
-              <h3 className="text-3xl font-black text-orange-600 mb-4">金額正確，但數量太多了！</h3>
-              <p className="text-xl text-gray-700 font-bold mb-8 bg-orange-50 p-4 rounded-xl border border-orange-200">
-                {suboptimalHint}
-              </p>
-              <button 
-                onClick={handleRetrySuboptimal}
-                className="bg-orange-500 hover:bg-orange-600 text-white px-10 py-4 rounded-xl text-2xl font-black transition-transform active:scale-95 shadow-xl w-full"
-              >
-                好，我重新補齊！
-              </button>
-            </div>
-          </div>
-        )}
-
-      </div>
-    </div>
-  );
-}
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
