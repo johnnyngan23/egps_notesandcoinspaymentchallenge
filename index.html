@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>安博百貨公司：貨幣付款挑戰賽</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <style>
+    /* 隱藏捲軸但保留捲動功能，讓畫面更乾淨 */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // --- 簡易 SVG 圖示元件 (替代 lucide-react 以利單檔執行) ---
+    const IconShoppingCart = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>;
+    const IconShoppingBag = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>;
+    const IconTrash2 = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>;
+    const IconCheckCircle = () => <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>;
+    const IconAlertTriangle = () => <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>;
+
+    // --- 常量與資料設定 ---
+    
+    // 將所有貨幣設定在此，並區分紙幣與硬幣
+    const CURRENCIES = [
+      // 紙幣
+      { value: 500, label: '$500', type: 'note', color: 'bg-amber-700 text-white' },
+      { value: 100, label: '$100', type: 'note', color: 'bg-red-500 text-white' },
+      { value: 50, label: '$50', type: 'note', color: 'bg-emerald-600 text-white' },
+      { value: 20, label: '$20', type: 'note', color: 'bg-blue-500 text-white' },
+      { value: 10, label: '$10', type: 'note', color: 'bg-purple-600 text-white' },
+      // 硬幣
+      { value: 10, label: '$10', type: 'coin', color: 'bg-gradient-to-br from-gray-200 to-gray-400 border-yellow-500 border-[3px] text-gray-800' },
+      { value: 5, label: '$5', type: 'coin', color: 'bg-gradient-to-br from-gray-300 to-gray-500 text-gray-900 border-gray-400 border-2' },
+      { value: 2, label: '$2', type: 'coin', color: 'bg-gradient-to-br from-gray-200 to-gray-400 text-gray-800 border-gray-300 border-2 waves-edge' },
+      { value: 1, label: '$1', type: 'coin', color: 'bg-gradient-to-br from-gray-200 to-gray-400 text-gray-800 border-gray-300 border-2' },
+      { value: 0.5, label: '5毫', type: 'coin', color: 'bg-gradient-to-br from-yellow-300 to-yellow-600 text-yellow-900 border-yellow-500 border-2' },
+      { value: 0.2, label: '2毫', type: 'coin', color: 'bg-gradient-to-br from-yellow-300 to-yellow-600 text-yellow-900 border-yellow-500 border-2 waves-edge' },
+      { value: 0.1, label: '1毫', type: 'coin', color: 'bg-gradient-to-br from-yellow-300 to-yellow-600 text-yellow-900 border-yellow-500 border-2' },
+    ];
+
+    const ITEMS = [
+      { name: '玩具熊', emoji: '🧸' }, { name: '書包', emoji: '🎒' }, { name: '故事書', emoji: '📘' },
+      { name: 'T恤', emoji: '👕' }, { name: '波鞋', emoji: '👟' }, { name: '手錶', emoji: '⌚' },
+      { name: '拼圖', emoji: '🧩' }, { name: '顏色筆', emoji: '🖍️' }, { name: '畫板', emoji: '🎨' },
+      { name: '足球', emoji: '⚽' }, { name: '水樽', emoji: '💧' }, { name: '筆盒', emoji: '🧃' },
+      { name: '遙控車', emoji: '🏎️' }, { name: '耳機', emoji: '🎧' }, { name: '滑板', emoji: '🛹' }
+    ];
+
+    const QUESTIONS_PER_LEVEL = 3;
+
+    // --- 輔助邏輯 ---
+
+    // 格式化貨幣顯示 (解決小數點浮點數問題)
+    const formatMoney = (val) => {
+      const rounded = Math.round(val * 10) / 10;
+      return Number.isInteger(rounded) ? `$${rounded}` : `$${rounded.toFixed(1)}`;
+    };
+
+    // 計算最佳組合 (為了避免浮點數誤差，將數值放大 10 倍以整數計算)
+    const getOptimalBreakdown = (amount) => {
+      let available = [5000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1]; // 放大10倍
+      let breakdown = {};
+      let remaining = Math.round(amount * 10);
+      
+      for (let denomCents of available) {
+        if (remaining >= denomCents) {
+          let num = Math.floor(remaining / denomCents);
+          let realValStr = (denomCents / 10).toString();
+          breakdown[realValStr] = num;
+          remaining -= num * denomCents;
+        }
+      }
+      return breakdown;
+    };
+
+    // 產生改善提示
+    const getImprovementHint = (userMoney, optimalBreakdown) => {
+      let userCounts = {};
+      userMoney.forEach(m => {
+          let valStr = m.value.toString();
+          userCounts[valStr] = (userCounts[valStr] || 0) + 1;
+      });
+      
+      let inefficientDenoms = [];
+      for (let val in userCounts) {
+          let optVal = optimalBreakdown[val] || 0;
+          if (userCounts[val] > optVal) {
+              inefficientDenoms.push(parseFloat(val));
+          }
+      }
+      
+      if (inefficientDenoms.length > 0) {
+          inefficientDenoms.sort((a,b) => a - b);
+          let target = inefficientDenoms[0];
+          let label = target >= 1 ? `$${target}` : `${target * 10}毫`;
+          return `💡 提示：試試看把多個 ${label} 換成更大的面額吧！系統已幫你刪除多餘的部分囉。`;
+      }
+      return "💡 提示：你可以用更少的貨幣數量來付款喔！系統已幫你退回多餘的部分。";
+    };
+
+    // 智能題庫生成器：加入角/毫，確保不超過 1000
+    const generateLevelPrices = () => {
+      let attempts = 0;
+      while (attempts < 2000) {
+        let prices = [];
+        
+        for (let i = 0; i < QUESTIONS_PER_LEVEL; i++) {
+          let p = 0;
+          if (i === 0) {
+            // 大金額: 500 - 990
+            p = 500 + Math.floor(Math.random() * 4) * 100 + Math.floor(Math.random() * 10) * 10;
+          } else if (i === 1) {
+            // 中金額 (含硬幣): 20 - 150
+            p = 20 + Math.floor(Math.random() * 130) + (Math.floor(Math.random() * 9 + 1) / 10);
+          } else {
+            // 小金額 (含硬幣): 1 - 20
+            p = Math.floor(Math.random() * 19 + 1) + (Math.floor(Math.random() * 9 + 1) / 10);
+          }
+          
+          p = Math.round(p * 10) / 10; // 取小數第一位
+          prices.push(p);
+        }
+        
+        // 打亂
+        prices.sort(() => Math.random() - 0.5);
+        let uniquePrices = new Set(prices);
+        if (uniquePrices.size === QUESTIONS_PER_LEVEL) {
+          return prices;
+        }
+        attempts++;
+      }
+      return [680, 45.5, 12.2].sort(() => Math.random() - 0.5);
+    };
+
+    const formatTime = (ms) => {
+      const totalSeconds = ms / 1000;
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = Math.floor(totalSeconds % 60);
+      const tenths = Math.floor((totalSeconds * 10) % 10);
+      return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${tenths}`;
+    };
+
+    // --- UI 組件 ---
+
+    const MoneyItem = ({ money, onClick, isSelectable = true }) => {
+      const baseClasses = `flex items-center justify-center shadow-sm transition-transform duration-200 shrink-0 select-none font-bold ${isSelectable ? 'cursor-pointer hover:-translate-y-1 hover:shadow-lg active:scale-95' : ''}`;
+      
+      if (money.type === 'note') {
+        return (
+          <div onClick={onClick} className={`${baseClasses} w-20 h-10 sm:w-24 sm:h-12 md:w-28 md:h-14 rounded-md border-2 border-white/30 text-sm md:text-lg ${money.color}`}>
+            {money.label}
+          </div>
+        );
+      } else {
+        // Coin
+        return (
+          <div onClick={onClick} className={`${baseClasses} w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-full text-xs md:text-sm ${money.color}`}>
+            {money.label}
+          </div>
+        );
+      }
+    };
+
+    function App() {
+      const [gameState, setGameState] = useState('menu');
+      const [studentName, setStudentName] = useState('');
+      
+      const [currentLevel, setCurrentLevel] = useState(1);
+      const [questionCount, setQuestionCount] = useState(1);
+      const [roundPrices, setRoundPrices] = useState([]);
+      const [currentItem, setCurrentItem] = useState(null);
+      const [targetPrice, setTargetPrice] = useState(0);
+      const [selectedMoney, setSelectedMoney] = useState([]);
+      
+      const [feedback, setFeedback] = useState(null);
+      const [suboptimalHint, setSuboptimalHint] = useState("");
+      
+      const [elapsedTime, setElapsedTime] = useState(0);
+      const [isTimerRunning, setIsTimerRunning] = useState(false);
+      const [leaderboard, setLeaderboard] = useState([]);
+
+      useEffect(() => {
+        try {
+          const saved = localStorage.getItem('moneySpeedLeaderboard');
+          if (saved) setLeaderboard(JSON.parse(saved));
+        } catch(e) {}
+      }, []);
+
+      useEffect(() => {
+        let interval;
+        if (isTimerRunning) {
+          interval = setInterval(() => {
+            setElapsedTime(prev => prev + 100);
+          }, 100);
+        }
+        return () => clearInterval(interval);
+      }, [isTimerRunning]);
+
+      const startChallenge = () => {
+        if (!studentName.trim()) {
+          alert("請先輸入名字！");
+          return;
+        }
+        setElapsedTime(0);
+        startLevel(1);
+      };
+
+      const startLevel = (level) => {
+        const prices = generateLevelPrices();
+        setRoundPrices(prices);
+        setCurrentLevel(level);
+        loadQuestion(1, prices[0]);
+        setGameState('playing');
+        setIsTimerRunning(true);
+      };
+
+      const loadQuestion = (qIndex, price) => {
+        setQuestionCount(qIndex);
+        setTargetPrice(price);
+        setCurrentItem(ITEMS[Math.floor(Math.random() * ITEMS.length)]);
+        setSelectedMoney([]);
+        setFeedback(null);
+        setSuboptimalHint("");
+      };
+
+      const addMoney = (moneyTemplate) => {
+        if (feedback !== null) return;
+        setSelectedMoney([...selectedMoney, { ...moneyTemplate, id: Date.now() + Math.random() }]);
+      };
+
+      const removeMoney = (idToRemove) => {
+        if (feedback !== null) return;
+        setSelectedMoney(selectedMoney.filter(m => m.id !== idToRemove));
+      };
+
+      const clearMoney = () => {
+        if (feedback !== null) return;
+        setSelectedMoney([]);
+      };
+
+      const checkPayment = () => {
+        // 計算總額並解決浮點數問題 (例如 0.1 + 0.2 = 0.3)
+        const totalCents = selectedMoney.reduce((sum, item) => sum + Math.round(item.value * 10), 0);
+        const targetCents = Math.round(targetPrice * 10);
+        
+        if (totalCents !== targetCents) {
+          setFeedback('wrong');
+          setTimeout(() => setFeedback(null), 1500);
+          return;
+        }
+
+        const optimalBreakdown = getOptimalBreakdown(targetPrice);
+        const optimalCount = Object.values(optimalBreakdown).reduce((a, b) => a + b, 0);
+
+        if (selectedMoney.length > optimalCount) {
+          const hintText = getImprovementHint(selectedMoney, optimalBreakdown);
+          setSuboptimalHint(hintText);
+          setFeedback('suboptimal');
+          return; 
+        }
+
+        setFeedback('correct');
+        setTimeout(() => {
+          if (questionCount < QUESTIONS_PER_LEVEL) {
+            loadQuestion(questionCount + 1, roundPrices[questionCount]);
+          } else {
+            if (currentLevel === 1) {
+              setIsTimerRunning(false);
+              setFeedback(null);
+              setGameState('transition');
+            } else {
+              setIsTimerRunning(false);
+              finishGame();
+            }
+          }
+        }, 1500);
+      };
+
+      const finishGame = () => {
+        const newRecord = { name: studentName, time: elapsedTime, date: new Date().toLocaleDateString() };
+        const updatedLeaderboard = [...leaderboard, newRecord].sort((a, b) => a.time - b.time);
+        setLeaderboard(updatedLeaderboard);
+        try { localStorage.setItem('moneySpeedLeaderboard', JSON.stringify(updatedLeaderboard)); } catch(e) {}
+        setGameState('result');
+      };
+
+      const handleRetrySuboptimal = () => {
+        const optimalBreakdown = getOptimalBreakdown(targetPrice);
+        let keptMoney = [];
+        let currentCounts = {};
+
+        selectedMoney.forEach(m => {
+          let valStr = m.value.toString();
+          currentCounts[valStr] = (currentCounts[valStr] || 0) + 1;
+          let optVal = optimalBreakdown[valStr] || 0;
+          if (currentCounts[valStr] <= optVal) {
+            keptMoney.push(m);
+          }
+        });
+
+        setSelectedMoney(keptMoney);
+        setFeedback(null);
+      };
+
+      const currentTotalCents = selectedMoney.reduce((sum, item) => sum + Math.round(item.value * 10), 0);
+      const currentTotal = currentTotalCents / 10;
+      const isHiddenTotal = currentLevel === 2;
+
+      // === 主選單與其他畫面省略渲染邏輯以縮減範例長度，僅保留核心的 Menu 與 Playing ===
+
+      if (gameState === 'menu') {
+        return (
+          <div className="min-h-screen bg-gradient-to-b from-sky-300 to-sky-100 flex flex-col items-center justify-center p-4">
+            <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-2xl w-full text-center border-4 border-indigo-200">
+               <h1 className="text-4xl md:text-5xl font-black text-rose-600 mb-4">安博百貨公司</h1>
+               <div className="bg-yellow-300 text-rose-800 px-6 py-2 rounded-full font-black text-xl mb-8 inline-block shadow-md">
+                 ⚡ 貨幣付款速度挑戰賽 ⚡
+               </div>
+               <div className="text-left bg-gray-50 p-6 rounded-xl mb-6">
+                 <h3 className="font-bold text-xl mb-2 text-indigo-800">遊戲規則：</h3>
+                 <ul className="list-disc pl-6 space-y-2 text-gray-700">
+                   <li>支援使用<strong>紙幣</strong>與<strong>硬幣</strong>付款（包含角/毫）。</li>
+                   <li>必須使用<span className="text-red-500 underline">最少數量</span>的貨幣組合！</li>
+                   <li>關卡 2 將會隱藏目標金額，考驗你的心算能力。</li>
+                 </ul>
+               </div>
+               <input 
+                 type="text" placeholder="請輸入挑戰者姓名" value={studentName}
+                 onChange={(e) => setStudentName(e.target.value)}
+                 className="w-full text-center text-2xl font-bold p-4 border-4 border-indigo-200 rounded-xl mb-4 focus:outline-none"
+               />
+               <button onClick={startChallenge} className="w-full bg-blue-500 hover:bg-blue-600 text-white p-4 rounded-xl text-2xl font-bold transition-all shadow-lg">
+                 開始挑戰
+               </button>
+            </div>
+          </div>
+        );
+      }
+
+      if (gameState === 'transition') {
+        return (
+          <div className="min-h-screen bg-red-100 flex items-center justify-center p-4">
+            <div className="bg-white p-8 rounded-3xl shadow-xl max-w-xl w-full text-center border-4 border-red-500">
+              <h1 className="text-4xl font-extrabold text-red-600 mb-4">難度升級！進入關卡 2</h1>
+              <p className="text-xl text-gray-700 mb-6 font-bold">⚠️ 注意：不會顯示應付總額，請自己看著標價計算！</p>
+              <button onClick={() => startLevel(2)} className="w-full bg-red-500 text-white p-4 rounded-xl text-2xl font-bold shadow-lg">
+                我準備好了！🚀
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      if (gameState === 'result') {
+        return (
+           <div className="min-h-screen bg-blue-100 flex items-center justify-center p-4">
+            <div className="bg-white p-8 rounded-3xl shadow-xl max-w-xl w-full text-center border-4 border-yellow-400">
+              <h1 className="text-4xl font-extrabold text-gray-800 mb-4">挑戰完成！</h1>
+              <p className="text-2xl text-blue-600 font-bold mb-6">太棒了，{studentName}！</p>
+              <div className="text-6xl font-black text-red-500 mb-8">{formatTime(elapsedTime)}</div>
+              <button onClick={() => setGameState('menu')} className="w-full bg-blue-500 text-white p-4 rounded-xl text-xl font-bold shadow-lg">
+                返回主選單
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      // --- Playing 狀態 ---
+      const notes = CURRENCIES.filter(c => c.type === 'note');
+      const coins = CURRENCIES.filter(c => c.type === 'coin');
+
+      return (
+        <div className="min-h-screen bg-sky-50 font-sans select-none flex flex-col h-screen overflow-hidden pb-4">
+          {/* 頂部導航 */}
+          <div className="bg-white shadow-sm px-4 py-3 flex justify-between items-center z-10 shrink-0 border-b-4 border-sky-200">
+            <div className="text-xl md:text-2xl font-black text-blue-800">
+              關卡 {currentLevel} | <span className="text-blue-600">{currentLevel === 1 ? '直接付款' : '心算挑戰'}</span>
+            </div>
+            <div className="bg-gray-800 text-green-400 font-mono px-4 py-1.5 rounded-lg text-xl md:text-2xl font-black shadow-inner">
+              {formatTime(elapsedTime)}
+            </div>
+          </div>
+
+          {/* 主要遊戲區域 */}
+          <div className="flex-1 flex flex-col md:flex-row p-2 md:p-4 gap-4 h-1/2 shrink-0">
+            {/* 左：購買物品 */}
+            <div className="w-full md:w-1/3 bg-white rounded-2xl shadow-md border-2 border-sky-200 p-4 flex flex-col relative items-center justify-center">
+              <div className="absolute top-3 left-3 bg-sky-100 text-sky-800 px-3 py-1 rounded-lg font-bold flex items-center gap-2">
+                <IconShoppingCart /> 購買物品
+              </div>
+              <div className="text-8xl mt-4">{currentItem?.emoji}</div>
+              <div className="text-3xl font-bold text-gray-700 mt-2">{currentItem?.name}</div>
+              <div className="mt-4 bg-amber-50 border-4 border-amber-300 rounded-xl px-4 py-3 w-full text-center">
+                <p className="text-amber-800 font-black">應付總額</p>
+                <p className="text-4xl font-black text-amber-600">{isHiddenTotal ? '???' : formatMoney(targetPrice)}</p>
+              </div>
+              {/* 商品標籤 (總是顯示供心算) */}
+              <div className="absolute top-1/2 -right-4 bg-yellow-200 border-2 border-yellow-500 rounded-lg px-3 py-1 font-black text-xl rotate-12 shadow-md">
+                {formatMoney(targetPrice)}
+              </div>
+            </div>
+
+            {/* 右：付費托盤 */}
+            <div className="w-full md:w-2/3 bg-emerald-50 rounded-2xl shadow-md border-2 border-emerald-300 p-4 flex flex-col relative">
+              <div className="flex justify-between items-center mb-2">
+                <h2 className="text-xl font-bold text-emerald-800 flex gap-2"><IconShoppingBag/> 付款托盤</h2>
+                <div className="flex gap-2 items-center">
+                  <button onClick={clearMoney} className="text-red-500 font-bold p-2 flex items-center gap-1 hover:bg-red-100 rounded">
+                    <IconTrash2 /> 清空
+                  </button>
+                  <div className="bg-white px-3 py-1 rounded-lg border-2 border-emerald-200 text-lg font-black text-emerald-600">
+                    已放入: {isHiddenTotal ? '???' : formatMoney(currentTotal)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 bg-white rounded-xl border-2 border-dashed border-emerald-400 p-3 flex flex-wrap content-start gap-2 overflow-y-auto no-scrollbar">
+                {selectedMoney.map((money) => (
+                  <MoneyItem key={money.id} money={money} onClick={() => removeMoney(money.id)} />
+                ))}
+              </div>
+
+              <button 
+                onClick={checkPayment}
+                disabled={selectedMoney.length === 0 || feedback !== null}
+                className={`absolute -bottom-5 right-6 px-8 py-3 rounded-full text-xl font-black text-white shadow-lg border-4 border-white ${
+                  selectedMoney.length === 0 || feedback !== null ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
+                }`}
+              >
+                確認結帳
+              </button>
+
+              {/* 回饋動畫 */}
+              {feedback === 'correct' && (
+                <div className="absolute inset-0 bg-white/90 z-20 flex flex-col items-center justify-center rounded-xl">
+                  <IconCheckCircle />
+                  <h2 className="text-3xl font-black text-green-500 mt-4">完全正確！</h2>
+                </div>
+              )}
+              {feedback === 'wrong' && (
+                <div className="absolute inset-0 bg-red-100/90 z-20 flex flex-col items-center justify-center rounded-xl">
+                  <h2 className="text-4xl font-black text-red-500">金額不對喔！</h2>
+                </div>
+              )}
+              {feedback === 'suboptimal' && (
+                <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center rounded-xl p-6 text-center">
+                  <IconAlertTriangle />
+                  <h2 className="text-2xl font-black text-orange-500 mt-2">金額正確，但張數太多了！</h2>
+                  <p className="text-lg text-gray-700 mt-2 font-bold">{suboptimalHint}</p>
+                  <button onClick={handleRetrySuboptimal} className="mt-4 bg-orange-500 text-white px-6 py-2 rounded-lg font-bold text-lg">
+                    我知道了，重新補齊
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 底部：錢包區 (分為紙幣與硬幣) */}
+          <div className="bg-indigo-50 border-t-4 border-indigo-200 mt-4 p-4 shrink-0 mx-2 md:mx-4 rounded-2xl shadow-inner flex flex-col gap-3">
+            <div className="flex items-center gap-4">
+              <span className="font-bold text-indigo-800 whitespace-nowrap bg-indigo-200 px-3 py-1 rounded-md">紙幣</span>
+              <div className="flex flex-wrap gap-2 md:gap-4 overflow-x-auto pb-2 no-scrollbar">
+                {notes.map(m => (
+                  <MoneyItem key={m.label} money={m} onClick={() => addMoney(m)} />
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="font-bold text-indigo-800 whitespace-nowrap bg-indigo-200 px-3 py-1 rounded-md">硬幣</span>
+              <div className="flex flex-wrap gap-2 md:gap-4 overflow-x-auto pb-2 no-scrollbar items-center">
+                {coins.map(m => (
+                  <MoneyItem key={m.label} money={m} onClick={() => addMoney(m)} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
